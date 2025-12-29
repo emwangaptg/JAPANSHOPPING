@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>購物清單小幫手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'brand-bg': '#FDFBF7',
+                        'brand-primary': '#7C3AED',
+                        'brand-secondary': '#A78BFA',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #FDFBF7;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        /* 隱藏 Scrollbar 但保持功能 */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* 瀑布流 */
+        .masonry-grid {
+            column-count: 2;
+            column-gap: 1rem;
+        }
+        @media (min-width: 640px) {
+            .masonry-grid { column-count: 3; }
+        }
+        @media (min-width: 1024px) {
+            .masonry-grid { column-count: 4; }
+        }
+        .masonry-item {
+            break-inside: avoid;
+            margin-bottom: 1rem;
+        }
+        /* 燈箱動畫 */
+        .lightbox-enter { opacity: 0; transform: scale(0.95); }
+        .lightbox-enter-active { opacity: 1; transform: scale(1); transition: all 0.2s ease-out; }
+        .lightbox-exit { opacity: 1; transform: scale(1); }
+        .lightbox-exit-active { opacity: 0; transform: scale(0.95); transition: all 0.2s ease-in; }
+    </style>
+</head>
+<body class="text-gray-700 h-screen flex flex-col overflow-hidden">
+
+    <!-- 頂部導航 -->
+    <header class="bg-white/80 backdrop-blur-md border-b border-gray-200 px-4 py-3 flex justify-between items-center z-20 shadow-sm flex-none">
+        <h1 class="text-xl font-bold text-gray-800 tracking-tight">
+            <i class="fa-solid fa-bag-shopping text-purple-500 mr-2"></i>必買清單
+        </h1>
+        <div class="flex gap-3">
+            <button onclick="openSettings()" class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 active:scale-95 transition">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+            <label class="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg hover:bg-purple-700 active:scale-95 transition cursor-pointer">
+                <i class="fa-solid fa-plus text-lg"></i>
+                <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="handleFiles(this.files)">
+            </label>
+        </div>
+    </header>
+
+    <!-- 分類過濾器 (水平捲動) -->
+    <nav class="bg-white/50 border-b border-gray-100 py-2 overflow-x-auto hide-scrollbar flex-none z-10">
+        <div class="flex px-4 gap-2" id="filterContainer">
+            <!-- 由 JS 動態生成 -->
+        </div>
+    </nav>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 overflow-y-auto p-4 relative" id="mainScroll">
+        <!-- 如果沒有內容 -->
+        <div id="emptyState" class="hidden flex flex-col items-center justify-center h-full text-center text-gray-400 p-8">
+            <i class="fa-regular fa-images text-6xl mb-4 text-gray-300"></i>
+            <p class="text-lg font-medium">還沒有商品截圖</p>
+            <p class="text-sm mt-2">點擊右上角「+」匯入照片<br>系統會自動儲存到手機中</p>
+        </div>
+
+        <!-- 瀑布流展示區 -->
+        <div id="galleryGrid" class="masonry-grid pb-20">
+            <!-- 圖片卡片由 JS 生成 -->
+        </div>
+    </main>
+
+    <!-- 底部狀態列 -->
+    <div id="loadingIndicator" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 flex items-center gap-2">
+        <i class="fa-solid fa-circle-notch fa-spin"></i>
+        <span>處理圖片中...</span>
+    </div>
+
+    <!-- 燈箱 / 分類 Modal -->
+    <div id="lightbox" class="fixed inset-0 bg-black/95 z-50 hidden flex-col transition-opacity duration-300" onclick="if(event.target === this) closeLightbox()">
+        
+        <!-- 燈箱頂部工具列 -->
+        <div class="flex justify-between items-center p-4 text-white bg-gradient-to-b from-black/50 to-transparent absolute top-0 w-full z-10">
+            <button onclick="closeLightbox()" class="p-2 text-white/80 hover:text-white"><i class="fa-solid fa-xmark text-2xl"></i></button>
+            <button onclick="deleteCurrentItem()" class="p-2 text-red-400 hover:text-red-300"><i class="fa-solid fa-trash"></i> 刪除</button>
+        </div>
+
+        <!-- 圖片區 -->
+        <div class="flex-1 flex items-center justify-center overflow-hidden p-2">
+            <img id="lightboxImg" src="" class="max-w-full max-h-full object-contain transition-transform duration-200" alt="商品預覽">
+        </div>
+
+        <!-- 底部操作區 (分類) -->
+        <div class="bg-gray-900/90 backdrop-blur border-t border-gray-700 p-4 pb-8 rounded-t-2xl">
+            <p class="text-gray-400 text-xs mb-3 text-center uppercase tracking-wider">這件商品在哪買？</p>
+            <div id="lightboxCategories" class="flex flex-wrap gap-2 justify-center">
+                <!-- JS 動態生成 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定 Modal (管理分類) -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/50 z-50 hidden items-end sm:items-center justify-center backdrop-blur-sm">
+        <div class="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl animate-[slideUp_0.3s_ease-out]">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-gray-800">管理分類</h2>
+                <button onclick="closeSettings()" class="w-8 h-8 bg-gray-100 rounded-full text-gray-500"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="space-y-4 mb-6 max-h-[50vh] overflow-y-auto" id="settingsCategoryList">
+                <!-- JS 生成 -->
+            </div>
+
+            <div class="flex gap-2">
+                <input type="text" id="newCategoryInput" placeholder="輸入新分類名稱 (例: Bic Camera)" 
+                    class="flex-1 bg-gray-100 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-purple-500 outline-none">
+                <button onclick="addNewCategory()" class="bg-purple-600 text-white px-4 rounded-xl font-bold shadow hover:bg-purple-700 active:scale-95 transition">
+                    新增
+                </button>
+            </div>
+            
+            <div class="mt-6 pt-6 border-t border-gray-100 text-center">
+                <button onclick="clearAllData()" class="text-xs text-red-400 hover:text-red-600 underline">清除所有圖片資料</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- IndexedDB Wrapper Script -->
+    <script>
+        // 簡單的資料庫管理
+        const DB_NAME = 'ShoppingListDB';
+        const DB_VERSION = 1;
+        let db;
+        let currentFilter = 'all';
+        let currentLightboxId = null;
+
+        // 預設分類
+        let categories = ['未分類', '便利商店', '藥妝店', '超市', '免稅店'];
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initDB();
+            loadCategories();
+            renderFilterBar();
+            loadItems();
+        });
+
+        // 1. 資料庫操作
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                
+                request.onupgradeneeded = (e) => {
+                    db = e.target.result;
+                    if (!db.objectStoreNames.contains('items')) {
+                        const store = db.createObjectStore('items', { keyPath: 'id' });
+                        store.createIndex('category', 'category', { unique: false });
+                        store.createIndex('created', 'created', { unique: false });
+                    }
+                    if (!db.objectStoreNames.contains('meta')) {
+                        db.createObjectStore('meta', { keyPath: 'key' });
+                    }
+                };
+
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    resolve(db);
+                };
+
+                request.onerror = (e) => reject(e);
+            });
+        }
+
+        async function saveItem(item) {
+            return new Promise((resolve) => {
+                const tx = db.transaction('items', 'readwrite');
+                tx.objectStore('items').put(item);
+                tx.oncomplete = () => resolve();
+            });
+        }
+
+        async function getAllItems() {
+            return new Promise((resolve) => {
+                const tx = db.transaction('items', 'readonly');
+                const request = tx.objectStore('items').getAll();
+                request.onsuccess = () => resolve(request.result.sort((a,b) => b.created - a.created)); // 新的在前
+            });
+        }
+
+        async function deleteItem(id) {
+            return new Promise((resolve) => {
+                const tx = db.transaction('items', 'readwrite');
+                tx.objectStore('items').delete(id);
+                tx.oncomplete = () => resolve();
+            });
+        }
+
+        // 2. 分類管理
+        function loadCategories() {
+            const stored = localStorage.getItem('categories');
+            if (stored) {
+                categories = JSON.parse(stored);
+            }
+        }
+
+        function saveCategories() {
+            localStorage.setItem('categories', JSON.stringify(categories));
+            renderFilterBar();
+            renderSettingsList();
+            updateLightboxCategories();
+        }
+
+        // 3. 圖片處理 (壓縮)
+        async function handleFiles(files) {
+            if (!files.length) return;
+            
+            const indicator = document.getElementById('loadingIndicator');
+            indicator.classList.remove('hidden');
+
+            for (let file of files) {
+                try {
+                    const compressed = await compressImage(file);
+                    const item = {
+                        id: Date.now() + Math.random().toString(),
+                        image: compressed,
+                        category: '未分類',
+                        created: Date.now()
+                    };
+                    await saveItem(item);
+                } catch (e) {
+                    console.error('圖片處理失敗', e);
+                }
+            }
+
+            indicator.classList.add('hidden');
+            document.getElementById('fileInput').value = ''; // 重置 input
+            loadItems();
+        }
+
+        function compressImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 800; // 手機瀏覽足夠了
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.7)); // 70% 品質
+                    };
+                };
+            });
+        }
+
+        // 4. UI 渲染
+        async function loadItems() {
+            const items = await getAllItems();
+            const grid = document.getElementById('galleryGrid');
+            const emptyState = document.getElementById('emptyState');
+            
+            grid.innerHTML = '';
+
+            const filteredItems = currentFilter === 'all' 
+                ? items 
+                : items.filter(i => i.category === currentFilter);
+
+            if (filteredItems.length === 0) {
+                if(items.length === 0) emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+
+            filteredItems.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'masonry-item bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition group relative break-inside-avoid';
+                
+                // 標籤
+                const tagColor = item.category === '未分類' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600';
+                
+                div.innerHTML = `
+                    <div class="relative">
+                        <img src="${item.image}" class="w-full h-auto block" loading="lazy">
+                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition"></div>
+                    </div>
+                    <div class="p-2 flex justify-between items-center">
+                        <span class="text-xs font-bold px-2 py-1 rounded-md ${tagColor} truncate max-w-[100%]">
+                            ${item.category}
+                        </span>
+                    </div>
+                `;
+                div.onclick = () => openLightbox(item);
+                grid.appendChild(div);
+            });
+        }
+
+        function renderFilterBar() {
+            const container = document.getElementById('filterContainer');
+            let html = `
+                <button onclick="setFilter('all')" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-medium transition ${currentFilter === 'all' ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200 text-gray-600'}">
+                    全部
+                </button>
+            `;
+            categories.forEach(cat => {
+                const isActive = currentFilter === cat;
+                const style = isActive ? 'bg-purple-600 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-600';
+                html += `
+                    <button onclick="setFilter('${cat}')" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-medium transition ${style}">
+                        ${cat}
+                    </button>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        function setFilter(cat) {
+            currentFilter = cat;
+            renderFilterBar();
+            loadItems();
+        }
+
+        // 5. 燈箱邏輯
+        function openLightbox(item) {
+            currentLightboxId = item.id;
+            const lb = document.getElementById('lightbox');
+            const img = document.getElementById('lightboxImg');
+            
+            img.src = item.image;
+            lb.classList.remove('hidden');
+            lb.classList.add('flex');
+            
+            updateLightboxCategories(item.category);
+        }
+
+        function closeLightbox() {
+            const lb = document.getElementById('lightbox');
+            lb.classList.add('hidden');
+            lb.classList.remove('flex');
+            currentLightboxId = null;
+        }
+
+        function updateLightboxCategories(currentCat) {
+            const container = document.getElementById('lightboxCategories');
+            container.innerHTML = '';
+            
+            categories.forEach(cat => {
+                const isSelected = cat === currentCat;
+                const btn = document.createElement('button');
+                btn.className = `px-4 py-2 rounded-lg text-sm font-medium transition ${isSelected ? 'bg-purple-500 text-white ring-2 ring-purple-300' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`;
+                btn.innerText = cat;
+                btn.onclick = () => changeItemCategory(cat);
+                container.appendChild(btn);
+            });
+        }
+
+        async function changeItemCategory(newCat) {
+            if (!currentLightboxId) return;
+            
+            // 從 DB 獲取並更新
+            const items = await getAllItems();
+            const item = items.find(i => i.id === currentLightboxId);
+            if (item) {
+                item.category = newCat;
+                await saveItem(item);
+                loadItems(); // 重新渲染列表
+                updateLightboxCategories(newCat); // 更新燈箱按鈕狀態
+                
+                // 視覺回饋
+                const toast = document.createElement('div');
+                toast.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/70 text-white px-6 py-3 rounded-xl z-[60] animate-pulse';
+                toast.innerText = `已移至：${newCat}`;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 800);
+            }
+        }
+
+        async function deleteCurrentItem() {
+            if (!currentLightboxId) return;
+            if (confirm('確定要刪除這張截圖嗎？')) {
+                await deleteItem(currentLightboxId);
+                closeLightbox();
+                loadItems();
+            }
+        }
+
+        // 6. 設定 Modal 邏輯
+        function openSettings() {
+            document.getElementById('settingsModal').classList.remove('hidden');
+            document.getElementById('settingsModal').classList.add('flex');
+            renderSettingsList();
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.add('hidden');
+            document.getElementById('settingsModal').classList.remove('flex');
+        }
+
+        function renderSettingsList() {
+            const list = document.getElementById('settingsCategoryList');
+            list.innerHTML = '';
+            categories.forEach((cat, index) => {
+                if (cat === '未分類') return; // 不可刪除未分類
+                
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-lg';
+                div.innerHTML = `
+                    <span class="font-medium">${cat}</span>
+                    <button onclick="removeCategory(${index})" class="text-red-400 p-2 hover:bg-red-50 rounded"><i class="fa-solid fa-trash"></i></button>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function addNewCategory() {
+            const input = document.getElementById('newCategoryInput');
+            const val = input.value.trim();
+            if (val && !categories.includes(val)) {
+                categories.push(val);
+                saveCategories();
+                input.value = '';
+                renderSettingsList();
+            }
+        }
+
+        function removeCategory(index) {
+            const cat = categories[index];
+            if (confirm(`刪除「${cat}」分類？\n注意：該分類下的商品將會變回「未分類」。`)) {
+                // 將該分類商品移回未分類
+                getAllItems().then(async items => {
+                    for (let item of items) {
+                        if (item.category === cat) {
+                            item.category = '未分類';
+                            await saveItem(item);
+                        }
+                    }
+                    categories.splice(index, 1);
+                    saveCategories();
+                    renderSettingsList();
+                    loadItems();
+                });
+            }
+        }
+
+        async function clearAllData() {
+            if(confirm('警告：這將刪除所有已儲存的圖片與資料，且無法復原。確定嗎？')) {
+                const tx = db.transaction('items', 'readwrite');
+                tx.objectStore('items').clear();
+                tx.oncomplete = () => {
+                    localStorage.removeItem('categories');
+                    location.reload();
+                };
+            }
+        }
+
+    </script>
+</body>
+</html>
