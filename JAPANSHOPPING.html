@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 FontAwesome 圖示 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 Panzoom 用於圖片縮放 -->
+    <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
     
     <script>
         tailwind.config = {
@@ -107,21 +109,36 @@
     <div id="lightbox" class="fixed inset-0 bg-black/95 z-50 hidden flex-col transition-opacity duration-300" onclick="if(event.target === this) closeLightbox()">
         
         <!-- 燈箱頂部工具列 -->
-        <div class="flex justify-between items-center p-4 text-white bg-gradient-to-b from-black/50 to-transparent absolute top-0 w-full z-10">
-            <button onclick="closeLightbox()" class="p-2 text-white/80 hover:text-white"><i class="fa-solid fa-xmark text-2xl"></i></button>
-            <button onclick="deleteCurrentItem()" class="p-2 text-red-400 hover:text-red-300"><i class="fa-solid fa-trash"></i> 刪除</button>
+        <div class="flex justify-between items-center p-4 text-white bg-gradient-to-b from-black/50 to-transparent absolute top-0 w-full z-10 pointer-events-none">
+            <button onclick="closeLightbox()" class="pointer-events-auto p-2 text-white/80 hover:text-white bg-black/20 rounded-full backdrop-blur-sm"><i class="fa-solid fa-xmark text-2xl"></i></button>
+            <button onclick="deleteCurrentItem()" class="pointer-events-auto p-2 text-red-400 hover:text-red-300 bg-black/20 rounded-full backdrop-blur-sm px-3 text-sm"><i class="fa-solid fa-trash"></i> 刪除</button>
         </div>
 
-        <!-- 圖片區 -->
-        <div class="flex-1 flex items-center justify-center overflow-hidden p-2">
-            <img id="lightboxImg" src="" class="max-w-full max-h-full object-contain transition-transform duration-200" alt="商品預覽">
+        <!-- 圖片區 (Panzoom Container) -->
+        <div class="flex-1 flex items-center justify-center overflow-hidden w-full relative" id="panzoomWrapper">
+            <!-- 圖片本身，增加 touch-action: none 以支援 Panzoom -->
+            <img id="lightboxImg" src="" class="max-w-full max-h-full object-contain transition-transform duration-200" style="touch-action: none;" alt="商品預覽">
         </div>
 
-        <!-- 底部操作區 (分類) -->
-        <div class="bg-gray-900/90 backdrop-blur border-t border-gray-700 p-4 pb-8 rounded-t-2xl">
-            <p class="text-gray-400 text-xs mb-3 text-center uppercase tracking-wider">這件商品在哪買？</p>
-            <div id="lightboxCategories" class="flex flex-wrap gap-2 justify-center">
-                <!-- JS 動態生成 -->
+        <!-- 底部操作區 (分類 + 筆記) -->
+        <div class="bg-gray-900/90 backdrop-blur border-t border-gray-700 rounded-t-2xl flex flex-col max-h-[40vh]" onclick="event.stopPropagation()">
+            
+            <!-- 筆記輸入區 -->
+            <div class="px-4 pt-4 pb-2">
+                <div class="relative">
+                    <textarea id="noteInput" rows="2" placeholder="在此輸入筆記 (例如: 價格、代買人、數量)..." 
+                        class="w-full bg-gray-800 text-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none placeholder-gray-500"
+                        onblur="saveNote()" oninput="autoExpand(this)"></textarea>
+                    <div class="absolute right-2 bottom-2 text-gray-500 text-xs pointer-events-none"><i class="fa-solid fa-pen"></i></div>
+                </div>
+            </div>
+
+            <!-- 分類按鈕區 -->
+            <div class="p-4 pt-0 pb-8 overflow-y-auto">
+                <p class="text-gray-400 text-xs mb-3 text-center uppercase tracking-wider mt-2">這件商品在哪買？</p>
+                <div id="lightboxCategories" class="flex flex-wrap gap-2 justify-center">
+                    <!-- JS 動態生成 -->
+                </div>
             </div>
         </div>
     </div>
@@ -160,6 +177,7 @@
         let db;
         let currentFilter = 'all';
         let currentLightboxId = null;
+        let panzoomInstance = null; // Panzoom 實例
 
         // 預設分類
         let categories = ['未分類', '便利商店', '藥妝店', '超市', '免稅店'];
@@ -251,6 +269,7 @@
                         id: Date.now() + Math.random().toString(),
                         image: compressed,
                         category: '未分類',
+                        note: '', // 新增筆記欄位
                         created: Date.now()
                     };
                     await saveItem(item);
@@ -314,18 +333,22 @@
                 const div = document.createElement('div');
                 div.className = 'masonry-item bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition group relative break-inside-avoid';
                 
-                // 標籤
+                // 標籤顏色
                 const tagColor = item.category === '未分類' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600';
                 
+                // 筆記提示
+                const noteIndicator = item.note ? `<i class="fa-solid fa-note-sticky text-yellow-500 ml-1"></i>` : '';
+
                 div.innerHTML = `
                     <div class="relative">
                         <img src="${item.image}" class="w-full h-auto block" loading="lazy">
                         <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition"></div>
                     </div>
                     <div class="p-2 flex justify-between items-center">
-                        <span class="text-xs font-bold px-2 py-1 rounded-md ${tagColor} truncate max-w-[100%]">
+                        <span class="text-xs font-bold px-2 py-1 rounded-md ${tagColor} truncate max-w-[85%]">
                             ${item.category}
                         </span>
+                        ${noteIndicator}
                     </div>
                 `;
                 div.onclick = () => openLightbox(item);
@@ -363,11 +386,30 @@
             currentLightboxId = item.id;
             const lb = document.getElementById('lightbox');
             const img = document.getElementById('lightboxImg');
+            const noteInput = document.getElementById('noteInput');
             
+            // 設定圖片與筆記
             img.src = item.image;
+            noteInput.value = item.note || '';
+            autoExpand(noteInput); // 調整高度
+
             lb.classList.remove('hidden');
             lb.classList.add('flex');
             
+            // 初始化 Panzoom (如果尚未初始化)
+            if (panzoomInstance) {
+                panzoomInstance.dispose();
+            }
+            panzoomInstance = Panzoom(img, {
+                maxScale: 5,
+                minScale: 1,
+                contain: 'outside', // 避免圖片移出視窗
+                startScale: 1
+            });
+            
+            // 每次打開重置縮放
+            panzoomInstance.reset();
+
             updateLightboxCategories(item.category);
         }
 
@@ -376,6 +418,36 @@
             lb.classList.add('hidden');
             lb.classList.remove('flex');
             currentLightboxId = null;
+            // 儲存筆記 (保險起見)
+            saveNote();
+        }
+
+        // 筆記相關
+        async function saveNote() {
+            if (!currentLightboxId) return;
+            const input = document.getElementById('noteInput');
+            const val = input.value.trim();
+
+            const items = await getAllItems();
+            const item = items.find(i => i.id === currentLightboxId);
+            if (item && item.note !== val) {
+                item.note = val;
+                await saveItem(item);
+                loadItems(); // 重新渲染列表以更新筆記圖示
+            }
+        }
+
+        function autoExpand(field) {
+            // 自動調整 Textarea 高度
+            field.style.height = 'inherit';
+            const computed = window.getComputedStyle(field);
+            const height = parseInt(computed.getPropertyValue('border-top-width'), 10)
+                         + parseInt(computed.getPropertyValue('padding-top'), 10)
+                         + field.scrollHeight
+                         + parseInt(computed.getPropertyValue('padding-bottom'), 10)
+                         + parseInt(computed.getPropertyValue('border-bottom-width'), 10);
+
+            field.style.height = Math.min(height, 150) + 'px'; // 最大高度限制
         }
 
         function updateLightboxCategories(currentCat) {
@@ -395,6 +467,9 @@
         async function changeItemCategory(newCat) {
             if (!currentLightboxId) return;
             
+            // 先儲存當前筆記
+            await saveNote();
+
             // 從 DB 獲取並更新
             const items = await getAllItems();
             const item = items.find(i => i.id === currentLightboxId);
